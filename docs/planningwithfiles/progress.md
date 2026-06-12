@@ -20,3 +20,4 @@
 - User reported the live URL showed `Route Error (400 Invalid content type: text/html; charset=UTF-8)`.
 - Migrated the deployed shell to official vinext/Sites runtime while preserving the point-cloud viewer under `public/viewer`.
 - Revalidated with `npm run validate` and browser DevTools; iframe shell and WebGL viewer passed.
+- Committed fix as `8a27f8754d7cad0d2beebe75a90614319761a0e9`, pushed to Sites source repository, saved Sites version 2, and deployed successfully.

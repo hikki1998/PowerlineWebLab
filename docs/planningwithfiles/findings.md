@@ -29,6 +29,8 @@
 - Runtime Route Error occurred after the first deployment because the initial hand-written static Worker returned `text/html` in a shape the Sites route layer did not accept.
 - The fix is to use the official vinext/Sites runtime shell and serve the existing point-cloud viewer from `public/viewer/index.html` inside a full-screen iframe.
 - Local browser validation after the fix passed with `hasFrame: true`, WebGL `true`, renderer point count `180000`, and `232054` non-background canvas pixels.
+- Version 2 was saved from commit `8a27f8754d7cad0d2beebe75a90614319761a0e9` and deployed successfully.
+- Current live URL remains `https://las-pointcloud-viewer-20260612.greenvalleyi-8733.chatgpt-team.site`, now on latest version number 2 with access mode `workspace_all`.
 
 ## Skill Context
 - `brainstorming` requires design approval before implementation.
