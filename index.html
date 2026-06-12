@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LAS Point Cloud Viewer</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark">PC</span>
+          <div>
+            <strong>LAS Point Cloud Viewer</strong>
+            <span id="rendererBadge">检测图形能力...</span>
+          </div>
+        </div>
+        <nav class="toolbar" aria-label="点云工具栏">
+          <button id="openFileButton" class="tool-button primary" title="打开本地 LAS 文件">打开</button>
+          <button id="resetViewButton" class="tool-button" title="复位视角">复位</button>
+          <button id="orbitButton" class="tool-button active" title="轨道浏览">轨道</button>
+          <button id="walkButton" class="tool-button" title="漫游模式">漫游</button>
+          <button id="measureButton" class="tool-button" title="两点测距">测距</button>
+          <button id="clipButton" class="tool-button" title="显示裁剪控制">裁剪</button>
+        </nav>
+      </header>
+
+      <aside class="sidebar sidebar-left">
+        <section class="panel upload-panel" id="dropZone">
+          <input id="fileInput" type="file" accept=".las" hidden />
+          <p class="panel-label">本地文件</p>
+          <h2>拖入 LAS 点云</h2>
+          <p>支持 `.las`，大文件会自动抽样渲染，原始文件不会上传。</p>
+          <button id="chooseFileButton" class="wide-button">选择文件</button>
+          <button id="sampleButton" class="wide-button ghost">生成测试点云</button>
+        </section>
+
+        <section class="panel">
+          <p class="panel-label">文件状态</p>
+          <div id="fileStatus" class="status-stack">
+            <span>尚未加载文件</span>
+          </div>
+        </section>
+
+        <section class="panel">
+          <p class="panel-label">LAS 元数据</p>
+          <dl id="metadataList" class="metadata-list">
+            <div><dt>点格式</dt><dd>-</dd></div>
+            <div><dt>原始点数</dt><dd>-</dd></div>
+            <div><dt>渲染点数</dt><dd>-</dd></div>
+            <div><dt>范围</dt><dd>-</dd></div>
+          </dl>
+        </section>
+
+        <section class="panel class-panel">
+          <p class="panel-label">类别过滤</p>
+          <div id="classList" class="class-list empty">加载点云后显示类别</div>
+        </section>
+      </aside>
+
+      <main class="viewer-wrap">
+        <canvas id="viewerCanvas"></canvas>
+        <svg id="measureOverlay" class="measure-overlay"></svg>
+        <div id="emptyState" class="empty-state">
+          <div>
+            <p class="panel-label">工作台已就绪</p>
+            <h1>打开本地 LAS 点云开始浏览</h1>
+            <p>支持 RGB、高程、类别三种显示；轨道浏览、漫游、裁剪、过滤和两点测距。</p>
+            <div class="empty-actions">
+              <button id="emptyOpenButton" class="wide-button">选择 LAS 文件</button>
+              <button id="emptySampleButton" class="wide-button ghost">生成测试点云</button>
+            </div>
+          </div>
+        </div>
+        <div id="toast" class="toast" role="status" aria-live="polite"></div>
+      </main>
+
+      <aside class="sidebar sidebar-right">
+        <section class="panel">
+          <p class="panel-label">显示模式</p>
+          <div class="segmented" id="displayModeGroup">
+            <button data-mode="elevation" class="active">高程</button>
+            <button data-mode="classification">类别</button>
+            <button data-mode="rgb" id="rgbModeButton">RGB</button>
+          </div>
+          <label class="control-row">
+            <span>点大小</span>
+            <input id="pointSize" type="range" min="1" max="8" value="2" step="0.5" />
+          </label>
+        </section>
+
+        <section class="panel">
+          <p class="panel-label">高程范围</p>
+          <div class="range-row">
+            <label>最小 <input id="minElevation" type="number" step="0.01" /></label>
+            <label>最大 <input id="maxElevation" type="number" step="0.01" /></label>
+          </div>
+          <button id="resetElevationButton" class="wide-button ghost">重置高程过滤</button>
+        </section>
+
+        <section class="panel" id="clipPanel">
+          <p class="panel-label">裁剪盒</p>
+          <label class="control-row"><span>X 最小</span><input id="clipMinX" type="range" min="0" max="100" value="0" /></label>
+          <label class="control-row"><span>X 最大</span><input id="clipMaxX" type="range" min="0" max="100" value="100" /></label>
+          <label class="control-row"><span>Y 最小</span><input id="clipMinY" type="range" min="0" max="100" value="0" /></label>
+          <label class="control-row"><span>Y 最大</span><input id="clipMaxY" type="range" min="0" max="100" value="100" /></label>
+          <label class="control-row"><span>Z 最小</span><input id="clipMinZ" type="range" min="0" max="100" value="0" /></label>
+          <label class="control-row"><span>Z 最大</span><input id="clipMaxZ" type="range" min="0" max="100" value="100" /></label>
+          <button id="resetClipButton" class="wide-button ghost">重置裁剪</button>
+        </section>
+
+        <section class="panel">
+          <p class="panel-label">测量结果</p>
+          <div id="measureInfo" class="measure-info">开启测距后，在点云上依次点击两个点。</div>
+        </section>
+
+        <section class="panel">
+          <p class="panel-label">性能策略</p>
+          <ul class="compact-list">
+            <li>WebGL GPU buffer 渲染</li>
+            <li>自动抽样防止页面锁死</li>
+            <li>WebGPU 能力探测与后续渲染器边界</li>
+          </ul>
+        </section>
+      </aside>
+
+      <footer class="statusbar">
+        <span id="statusMode">模式：轨道</span>
+        <span id="statusPoints">点数：-</span>
+        <span id="statusSampling">抽样：-</span>
+        <span id="statusCoords">坐标：-</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+
