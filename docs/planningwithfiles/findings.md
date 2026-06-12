@@ -21,6 +21,14 @@
 - A second Sites project creation attempt returned the same 401 `token_invalidated` response.
 - Current build archive for later handoff: `.tmp/point-cloud-web-viewer-dist.tar.gz`.
 - A third Sites project creation attempt returned the same 401 `token_invalidated` response after confirming the deployable build artifacts still exist.
+- After connector authentication was refreshed, Sites project creation succeeded with project id `appgprj_6a2c2224524081918cf3d23b9cda7d38`.
+- Source commit `9a8e0410c6d45604fd2a1399c83df843f0521a39` was pushed to the Sites source repository branch `main`.
+- Sites version 1 was saved and deployed successfully.
+- Current live URL: `https://las-pointcloud-viewer-20260612.greenvalleyi-8733.chatgpt-team.site`.
+- Site access mode is `custom`; the policy currently allows the owner user only.
+- Runtime Route Error occurred after the first deployment because the initial hand-written static Worker returned `text/html` in a shape the Sites route layer did not accept.
+- The fix is to use the official vinext/Sites runtime shell and serve the existing point-cloud viewer from `public/viewer/index.html` inside a full-screen iframe.
+- Local browser validation after the fix passed with `hasFrame: true`, WebGL `true`, renderer point count `180000`, and `232054` non-background canvas pixels.
 
 ## Skill Context
 - `brainstorming` requires design approval before implementation.

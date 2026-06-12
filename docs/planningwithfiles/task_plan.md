@@ -4,7 +4,7 @@
 Create a Sites-compatible web application for loading LAS point clouds, browsing them in 3D, switching display modes by elevation, classification, and RGB, and providing common point-cloud viewer interactions.
 
 ## Current Phase
-Local implementation and validation complete. Sites production deployment is blocked by an invalidated connector authentication token.
+Complete. Local implementation, validation, Sites version save, and production deployment succeeded.
 
 ## Phases
 - [x] Phase 1: Confirm scope and write approved design spec.
@@ -12,7 +12,7 @@ Local implementation and validation complete. Sites production deployment is blo
 - [x] Phase 3: Implement LAS loading, parsing, scene rendering, and camera controls.
 - [x] Phase 4: Implement display modes, filtering, measurement, clipping, and viewer UI.
 - [x] Phase 5: Validate locally with build and browser checks.
-- [ ] Phase 6: Prepare Sites handoff or deployment when Sites authentication is available.
+- [x] Phase 6: Prepare Sites handoff or deployment when Sites authentication is available.
 
 ## Decisions
 - Workspace is currently empty and not a Git repository.
@@ -30,3 +30,5 @@ Local implementation and validation complete. Sites production deployment is blo
 | Sites `_create_site` failed with 401 `token_invalidated`. | Attempted production Sites project creation after local validation. | Local site and deployable `dist/` are ready; user needs to refresh Sites authentication before production deployment can continue. |
 | Sites `_create_site` failed again with 401 `token_invalidated`. | Re-attempted after re-running build, LAS validation, and browser validation. | Same external authentication blocker remains; no additional local work is needed for site functionality. |
 | Sites `_create_site` failed a third consecutive goal turn with 401 `token_invalidated`. | Re-attempted after confirming `dist/` and `.tmp/point-cloud-web-viewer-dist.tar.gz` exist. | Mark the active goal blocked until the Sites connector is re-authenticated. |
+| Production URL returned authentication failure in `Invoke-WebRequest`. | Checked live URL from PowerShell after deployment. | Sites reports deployment `succeeded`; site access is `custom`, owner-only, so unauthenticated command-line access is expected to fail. |
+| Live URL showed `Route Error (400 Invalid content type: text/html; charset=UTF-8)`. | User opened the deployed URL. | Replaced the hand-written static Worker with the official vinext/Sites runtime shell and embedded the existing viewer from `public/viewer/index.html`. |

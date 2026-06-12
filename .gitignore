@@ -1,5 +1,8 @@
 node_modules/
 dist/
+.next/
+.open-next/
+.wrangler/
 .superpowers/
 .tmp/
 *.log

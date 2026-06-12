@@ -15,3 +15,8 @@
 - Prepared a deployable build archive at `.tmp/point-cloud-web-viewer-dist.tar.gz` from the current `dist/` output.
 - Confirmed `dist/server/index.js`, `dist/client/index.html`, `dist/client/screenshot.jpeg`, `dist/.openai/hosting.json`, and `.tmp/point-cloud-web-viewer-dist.tar.gz` still exist.
 - Third Sites `_create_site` attempt failed with the same 401 `token_invalidated`; no further local action can publish the site until connector authentication is refreshed.
+- After Sites authentication was refreshed, created the Sites project, wrote `project_id` to `.openai/hosting.json`, rebuilt and validated with `npm run validate`, committed source as `9a8e0410c6d45604fd2a1399c83df843f0521a39`, pushed it to the Sites source repository, saved version 1, and deployed production successfully.
+- Production URL: `https://las-pointcloud-viewer-20260612.greenvalleyi-8733.chatgpt-team.site`.
+- User reported the live URL showed `Route Error (400 Invalid content type: text/html; charset=UTF-8)`.
+- Migrated the deployed shell to official vinext/Sites runtime while preserving the point-cloud viewer under `public/viewer`.
+- Revalidated with `npm run validate` and browser DevTools; iframe shell and WebGL viewer passed.

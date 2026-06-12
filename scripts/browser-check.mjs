@@ -53,13 +53,25 @@ await client.send("Page.enable");
 await client.send("Page.bringToFront");
 await client.send("Page.navigate", { url: endpoint });
 await wait(4000);
+await client.send("Runtime.evaluate", {
+  expression: `(() => {
+    const frame = document.querySelector(".viewerFrame");
+    if (frame && location.search && !new URL(frame.src, location.href).search) {
+      frame.src = new URL(frame.getAttribute("src"), location.href).pathname + location.search;
+    }
+  })()`,
+});
+await wait(2000);
 
 const result = await client.send("Runtime.evaluate", {
   returnByValue: true,
   awaitPromise: true,
   expression: `(() => {
-    const canvas = document.querySelector("#viewerCanvas");
-    window.__viewerDebug?.renderer?.render?.();
+    const frame = document.querySelector(".viewerFrame");
+    const frameWindow = frame?.contentWindow || window;
+    const frameDocument = frame?.contentDocument || document;
+    const canvas = frameDocument.querySelector("#viewerCanvas");
+    frameWindow.__viewerDebug?.renderer?.render?.();
     const gl = canvas && (canvas.getContext("webgl2") || canvas.getContext("webgl"));
     let nonBg = 0;
     let size = null;
@@ -77,16 +89,17 @@ const result = await client.send("Runtime.evaluate", {
       title: document.title,
       href: location.href,
       readyState: document.readyState,
-      bodyText: document.body?.innerText?.slice(0, 300) || "",
-      hiddenEmptyState: document.querySelectorAll(".empty-state.hidden").length,
-      statusPoints: document.querySelector("#statusPoints")?.textContent || "",
-      metadata: document.querySelector("#metadataList")?.innerText || "",
-      classRows: document.querySelectorAll(".class-item").length,
+      bodyText: frameDocument.body?.innerText?.slice(0, 300) || document.body?.innerText?.slice(0, 300) || "",
+      hiddenEmptyState: frameDocument.querySelectorAll(".empty-state.hidden").length,
+      statusPoints: frameDocument.querySelector("#statusPoints")?.textContent || "",
+      metadata: frameDocument.querySelector("#metadataList")?.innerText || "",
+      classRows: frameDocument.querySelectorAll(".class-item").length,
       webgl: Boolean(gl),
       canvas: size,
       nonBackgroundPixels: nonBg,
-      rendererBadge: document.querySelector("#rendererBadge")?.textContent || ""
-      , rendererPointCount: window.__viewerDebug?.renderer?.pointCount || 0
+      rendererBadge: frameDocument.querySelector("#rendererBadge")?.textContent || "",
+      hasFrame: Boolean(frame),
+      rendererPointCount: frameWindow.__viewerDebug?.renderer?.pointCount || 0
     };
   })()`,
 });
