@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { parseLas, readLasHeader } from "../src/las.js";
+import { parseLas, readLasHeader } from "../public/viewer/src/las.js";
 
 const defaultDir = "E:\\code\\VibeCodingProject\\las_pointcloud_viewer\\test_data";
 const dir = process.argv[2] || defaultDir;
