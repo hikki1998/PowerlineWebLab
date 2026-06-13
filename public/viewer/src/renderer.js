@@ -21,8 +21,9 @@ uniform bool u_pointAttenuation;
 varying vec3 v_color;
 void main() {
   gl_Position = u_matrix * vec4(a_position, 1.0);
-  float attenuatedSize = clamp(u_pointSize * (260.0 / max(gl_Position.w, 1.0)), 1.0, u_pointSize * 3.0);
-  gl_PointSize = u_pointAttenuation ? attenuatedSize : u_pointSize;
+  float baseSize = max(u_pointSize, 1.8);
+  float attenuatedSize = clamp(baseSize * (260.0 / max(gl_Position.w, 1.0)), 1.8, baseSize * 3.0);
+  gl_PointSize = u_pointAttenuation ? attenuatedSize : baseSize;
   v_color = a_color;
 }`;
 
@@ -32,8 +33,10 @@ varying vec3 v_color;
 uniform bool u_encodeDepth;
 void main() {
   vec2 d = gl_PointCoord - vec2(0.5);
-  if (dot(d, d) > 0.25) discard;
-  gl_FragColor = vec4(v_color, u_encodeDepth ? gl_FragCoord.z : 1.0);
+  float r2 = dot(d, d);
+  if (r2 > 0.25) discard;
+  float edge = smoothstep(0.25, 0.16, r2);
+  gl_FragColor = vec4(v_color, u_encodeDepth ? gl_FragCoord.z : edge);
 }`;
 
 const POST_VERTEX_SHADER = `
@@ -129,8 +132,23 @@ export class PointCloudRenderer {
     this.annotationMode = false;
     this.routeEditMode = false;
     this.routeDrag = null;
-    this.mouseInversion = { rotate: false, pan: false };
+    this.navigation = {
+      invertRotateX: false,
+      invertRotateY: false,
+      invertPanX: false,
+      invertPanY: false,
+      invertWheelZoom: false,
+      rotateSpeed: 1,
+      panSpeed: 1,
+      zoomSpeed: 1,
+      walkSpeed: 1,
+    };
+    this.stats = { lastRenderMs: 0, fps: 0, lastRenderAt: 0 };
     this.bounds = { min: [-1, -1, -1], max: [1, 1, 1] };
+    this.viewportCssWidth = 1;
+    this.viewportCssHeight = 1;
+    this.needsResize = true;
+    this.interacting = false;
     this.camera = {
       target: vec3(),
       distance: 500,
@@ -181,15 +199,41 @@ export class PointCloudRenderer {
     this.annotationMode = Boolean(enabled);
   }
 
-  setMouseInversion({ rotate = this.mouseInversion.rotate, pan = this.mouseInversion.pan } = {}) {
-    this.mouseInversion = {
-      rotate: Boolean(rotate),
-      pan: Boolean(pan),
+  setNavigationSettings(settings = {}) {
+    this.navigation = {
+      ...this.navigation,
+      ...settings,
+      rotateSpeed: clamp(Number(settings.rotateSpeed ?? this.navigation.rotateSpeed) || 1, 0.05, 10),
+      panSpeed: clamp(Number(settings.panSpeed ?? this.navigation.panSpeed) || 1, 0.05, 10),
+      zoomSpeed: clamp(Number(settings.zoomSpeed ?? this.navigation.zoomSpeed) || 1, 0.05, 10),
+      walkSpeed: clamp(Number(settings.walkSpeed ?? this.navigation.walkSpeed) || 1, 0.05, 20),
     };
+  }
+
+  setMouseInversion({ rotate = false, pan = false } = {}) {
+    this.setNavigationSettings({
+      invertRotateX: Boolean(rotate),
+      invertRotateY: Boolean(rotate),
+      invertPanX: Boolean(pan),
+      invertPanY: Boolean(pan),
+    });
   }
 
   setInvertMouseButtons(enabled) {
     this.setMouseInversion({ rotate: Boolean(enabled), pan: Boolean(enabled) });
+  }
+
+  getStats() {
+    return {
+      pointCount: this.pointCount,
+      mode: this.mode,
+      edl: { ...this.edl },
+      pointSize: this.pointSize,
+      pointAttenuation: this.pointAttenuation,
+      lastRenderMs: this.stats.lastRenderMs,
+      fps: this.stats.fps,
+      navigation: { ...this.navigation },
+    };
   }
 
   setEdl({ enabled = this.edl.enabled, strength = this.edl.strength, radius = this.edl.radius } = {}) {
@@ -240,6 +284,14 @@ export class PointCloudRenderer {
 
   setRouteEditMode(enabled) {
     this.routeEditMode = Boolean(enabled);
+  }
+
+  setInteracting(enabled) {
+    const next = Boolean(enabled);
+    if (this.interacting === next) return;
+    this.interacting = next;
+    this.callbacks.onInteractionChange?.(next);
+    if (!next) this.callbacks.onViewChange?.({ interactive: false, final: true });
   }
 
   focusOnPoint(point, radius = 35) {
@@ -341,8 +393,8 @@ export class PointCloudRenderer {
     const clip = transformPoint(this.matrix, point);
     if (clip[3] <= 0 || clip[2] < -1 || clip[2] > 1) return null;
     return {
-      x: (clip[0] * 0.5 + 0.5) * this.canvas.clientWidth,
-      y: (-clip[1] * 0.5 + 0.5) * this.canvas.clientHeight,
+      x: (clip[0] * 0.5 + 0.5) * this.viewportCssWidth,
+      y: (-clip[1] * 0.5 + 0.5) * this.viewportCssHeight,
       depth: clip[2],
     };
   }
@@ -378,8 +430,16 @@ export class PointCloudRenderer {
 
   attachEvents() {
     window.addEventListener("resize", () => {
-      if (this.resize()) this.requestRender();
+      this.needsResize = true;
+      this.requestRender();
     });
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => {
+        this.needsResize = true;
+        this.requestRender();
+      });
+      this.resizeObserver.observe(this.canvas);
+    }
     window.addEventListener("keydown", (event) => {
       this.keys.add(event.key.toLowerCase());
       this.requestRender();
@@ -399,6 +459,7 @@ export class PointCloudRenderer {
         if (hit) {
           event.preventDefault();
           this.routeDrag = { index: hit.index };
+          this.setInteracting(true);
           this.callbacks.onRouteWaypointSelect?.(hit.index);
           return;
         }
@@ -433,11 +494,19 @@ export class PointCloudRenderer {
           const hit = this.pickPoint(event.clientX, event.clientY);
           if (hit) this.callbacks.onMeasurePick?.(hit);
         }
+        return;
       }
+      if (!this.measureMode && !this.profileMode && !this.annotationMode) this.setInteracting(true);
     });
     this.canvas.addEventListener("pointerup", () => {
       this.pointer.down = false;
       this.routeDrag = null;
+      this.setInteracting(false);
+    });
+    this.canvas.addEventListener("pointercancel", () => {
+      this.pointer.down = false;
+      this.routeDrag = null;
+      this.setInteracting(false);
     });
     this.canvas.addEventListener("pointermove", (event) => {
       const dx = event.clientX - this.pointer.x;
@@ -453,30 +522,34 @@ export class PointCloudRenderer {
       if (!this.pointer.down || this.measureMode || this.profileMode || this.annotationMode) return;
 
       if (this.mode === "walk") {
-        const rotateSign = this.mouseInversion.rotate ? -1 : 1;
-        this.camera.flyYaw -= dx * 0.004 * rotateSign;
-        this.camera.flyPitch = clamp(this.camera.flyPitch - dy * 0.003 * rotateSign, -1.35, 1.35);
+        const rotateSignX = this.navigation.invertRotateX ? -1 : 1;
+        const rotateSignY = this.navigation.invertRotateY ? -1 : 1;
+        this.camera.flyYaw -= dx * 0.004 * this.navigation.rotateSpeed * rotateSignX;
+        this.camera.flyPitch = clamp(this.camera.flyPitch - dy * 0.003 * this.navigation.rotateSpeed * rotateSignY, -1.35, 1.35);
         this.requestRender();
         return;
       }
 
       if (this.orbitAction(event) === "pan") {
-        const panSign = this.mouseInversion.pan ? -1 : 1;
-        this.pan(dx * panSign, dy * panSign);
+        const panSignX = this.navigation.invertPanX ? -1 : 1;
+        const panSignY = this.navigation.invertPanY ? -1 : 1;
+        this.pan(dx * panSignX, dy * panSignY);
       } else {
-        const rotateSign = this.mouseInversion.rotate ? -1 : 1;
-        this.camera.yaw -= dx * 0.005 * rotateSign;
-        this.camera.pitch = clamp(this.camera.pitch + dy * 0.004 * rotateSign, -1.45, 1.45);
+        const rotateSignX = this.navigation.invertRotateX ? -1 : 1;
+        const rotateSignY = this.navigation.invertRotateY ? -1 : 1;
+        this.camera.yaw -= dx * 0.005 * this.navigation.rotateSpeed * rotateSignX;
+        this.camera.pitch = clamp(this.camera.pitch + dy * 0.004 * this.navigation.rotateSpeed * rotateSignY, -1.45, 1.45);
       }
       this.requestRender();
     });
     this.canvas.addEventListener("wheel", (event) => {
       event.preventDefault();
+      const wheelDirection = (event.deltaY > 0 ? 1 : -1) * (this.navigation.invertWheelZoom ? -1 : 1);
       if (this.mode === "walk") {
         const dir = this.flyDirection();
-        this.camera.flyPosition = add(this.camera.flyPosition, scale(dir, event.deltaY > 0 ? -18 : 18));
+        this.camera.flyPosition = add(this.camera.flyPosition, scale(dir, wheelDirection > 0 ? -18 * this.navigation.zoomSpeed : 18 * this.navigation.zoomSpeed));
       } else {
-        const factor = event.deltaY > 0 ? 1.12 : 0.88;
+        const factor = Math.pow(1.12, wheelDirection * this.navigation.zoomSpeed);
         this.camera.distance = clamp(this.camera.distance * factor, 0.5, 1_000_000);
       }
       this.requestRender();
@@ -491,7 +564,7 @@ export class PointCloudRenderer {
 
   pan(dx, dy) {
     const { right, up } = this.cameraBasis();
-    const scaleFactor = this.camera.distance / Math.max(this.canvas.clientHeight, 1);
+    const scaleFactor = (this.camera.distance / Math.max(this.viewportCssHeight, 1)) * this.navigation.panSpeed;
     this.camera.target = add(
       this.camera.target,
       add(scale(right, -dx * scaleFactor), scale(up, dy * scaleFactor)),
@@ -500,7 +573,7 @@ export class PointCloudRenderer {
 
   screenDeltaToWorld(dx, dy) {
     const { right, up } = this.cameraBasis();
-    const scaleFactor = this.camera.distance / Math.max(this.canvas.clientHeight, 1);
+    const scaleFactor = this.camera.distance / Math.max(this.viewportCssHeight, 1);
     return add(scale(right, dx * scaleFactor), scale(up, -dy * scaleFactor));
   }
 
@@ -527,7 +600,7 @@ export class PointCloudRenderer {
 
   updateWalk(deltaSeconds) {
     if (this.mode !== "walk") return false;
-    const speed = 120 * deltaSeconds * (this.keys.has("shift") ? 4 : 1);
+    const speed = 120 * this.navigation.walkSpeed * deltaSeconds * (this.keys.has("shift") ? 4 : 1);
     const dir = this.flyDirection();
     const right = normalize(cross(dir, [0, 1, 0]));
     let movement = [0, 0, 0];
@@ -578,7 +651,7 @@ export class PointCloudRenderer {
   }
 
   currentViewProjection() {
-    const aspect = Math.max(this.canvas.clientWidth / Math.max(this.canvas.clientHeight, 1), 0.1);
+    const aspect = Math.max(this.viewportCssWidth / Math.max(this.viewportCssHeight, 1), 0.1);
     const size = length(sub(this.bounds.max, this.bounds.min)) || 1000;
     const far = Math.max(size * 8 + this.camera.distance * 2, 1000);
     const projection = perspective(Math.PI / 4, aspect, 0.05, far);
@@ -597,8 +670,12 @@ export class PointCloudRenderer {
 
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
-    const height = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
+    const rect = this.canvas.getBoundingClientRect();
+    this.viewportCssWidth = Math.max(1, rect.width);
+    this.viewportCssHeight = Math.max(1, rect.height);
+    const width = Math.max(1, Math.floor(this.viewportCssWidth * dpr));
+    const height = Math.max(1, Math.floor(this.viewportCssHeight * dpr));
+    this.needsResize = false;
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.canvas.width = width;
       this.canvas.height = height;
@@ -621,12 +698,13 @@ export class PointCloudRenderer {
     const delta = Math.min(0.05, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
     const moving = this.updateWalk(delta);
-    if (this.resize()) this.needsRender = true;
+    if (this.needsResize && this.resize()) this.needsRender = true;
     if (this.needsRender || moving) this.render();
     if (moving) this.requestRender();
   }
 
   render() {
+    const renderStart = performance.now();
     const gl = this.gl;
     const useEdl = this.edl.enabled && this.ensureEdlTarget();
     if (useEdl) {
@@ -639,7 +717,12 @@ export class PointCloudRenderer {
       this.renderScene(false);
     }
     this.needsRender = false;
-    this.callbacks.onViewChange?.();
+    const renderEnd = performance.now();
+    const frameGap = this.stats.lastRenderAt ? renderEnd - this.stats.lastRenderAt : 0;
+    this.stats.lastRenderMs = renderEnd - renderStart;
+    this.stats.fps = frameGap > 0 ? 1000 / frameGap : 0;
+    this.stats.lastRenderAt = renderEnd;
+    this.callbacks.onViewChange?.({ interactive: this.interacting || moving });
   }
 
   renderScene(encodeDepth) {
@@ -658,6 +741,12 @@ export class PointCloudRenderer {
   renderCloudPoints(encodeDepth) {
     const gl = this.gl;
     gl.useProgram(this.program);
+    if (encodeDepth) {
+      gl.disable(gl.BLEND);
+    } else {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
     gl.uniformMatrix4fv(gl.getUniformLocation(this.program, "u_matrix"), false, new Float32Array(this.matrix));
     gl.uniform1f(gl.getUniformLocation(this.program, "u_pointSize"), this.pointSize * Math.min(window.devicePixelRatio || 1, 2));
     gl.uniform1i(gl.getUniformLocation(this.program, "u_encodeDepth"), encodeDepth ? 1 : 0);
@@ -674,6 +763,7 @@ export class PointCloudRenderer {
     gl.vertexAttribPointer(colorLocation, 3, gl.UNSIGNED_BYTE, true, 0, 0);
 
     gl.drawArrays(gl.POINTS, 0, this.pointCount);
+    if (!encodeDepth) gl.disable(gl.BLEND);
   }
 
   renderRoute() {

@@ -88,8 +88,19 @@ const els = {
   rgbModeButton: document.getElementById("rgbModeButton"),
   pointSize: document.getElementById("pointSize"),
   pointAttenuation: document.getElementById("pointAttenuation"),
-  invertRotateDrag: document.getElementById("invertRotateDrag"),
-  invertPanDrag: document.getElementById("invertPanDrag"),
+  invertRotateX: document.getElementById("invertRotateX"),
+  invertRotateY: document.getElementById("invertRotateY"),
+  invertPanX: document.getElementById("invertPanX"),
+  invertPanY: document.getElementById("invertPanY"),
+  invertWheelZoom: document.getElementById("invertWheelZoom"),
+  rotateSpeed: document.getElementById("rotateSpeed"),
+  panSpeed: document.getElementById("panSpeed"),
+  zoomSpeed: document.getElementById("zoomSpeed"),
+  walkSpeed: document.getElementById("walkSpeed"),
+  rotateSpeedValue: document.getElementById("rotateSpeedValue"),
+  panSpeedValue: document.getElementById("panSpeedValue"),
+  zoomSpeedValue: document.getElementById("zoomSpeedValue"),
+  walkSpeedValue: document.getElementById("walkSpeedValue"),
   waypointDialog: document.getElementById("waypointDialog"),
   waypointDialogTitle: document.getElementById("waypointDialogTitle"),
   waypointDialogSummary: document.getElementById("waypointDialogSummary"),
@@ -123,6 +134,7 @@ const els = {
   runClearanceButton: document.getElementById("runClearanceButton"),
   clearanceInfo: document.getElementById("clearanceInfo"),
   clearanceList: document.getElementById("clearanceList"),
+  performanceStats: document.getElementById("performanceStats"),
   statusMode: document.getElementById("statusMode"),
   statusPoints: document.getElementById("statusPoints"),
   statusSampling: document.getElementById("statusSampling"),
@@ -163,6 +175,17 @@ const state = {
   visibleClasses: new Set(),
   classColors: new Map(),
   pointAttenuation: true,
+  navigation: {
+    invertRotateX: false,
+    invertRotateY: false,
+    invertPanX: false,
+    invertPanY: false,
+    invertWheelZoom: false,
+    rotateSpeed: 1,
+    panSpeed: 1,
+    zoomSpeed: 1,
+    walkSpeed: 1,
+  },
   elevationMin: 0,
   elevationMax: 1,
   measurement: [],
@@ -183,6 +206,11 @@ const state = {
 };
 
 let renderer;
+let lastOverlayMarkup = "";
+let lastOverlayViewBox = "";
+let lastViewGizmoMarkup = "";
+let lastPerformanceMarkup = "";
+let lastPerformanceUpdate = 0;
 
 init();
 
@@ -194,12 +222,14 @@ function init() {
     onProfileUndo: () => undoProfilePoint(),
     onAnnotationPick: (hit) => addIssueAnnotation(hit.point),
     onMeasureUndo: () => undoMeasurePoint(),
-    onViewChange: () => updateViewOverlays(),
+    onViewChange: (meta) => updateViewOverlays(meta),
+    onInteractionChange: (active) => setNavigationOverlaySuspended(active),
     onRouteWaypointSelect: (index) => updateRouteSelection(index),
     onRouteWaypointMove: (index, delta) => moveWaypointByDisplayDelta(index, delta),
   });
   window.__viewerDebug = { renderer, state };
   wireControls();
+  syncNavigationSettings({ silent: true });
   setMode("orbit");
   if (new URLSearchParams(window.location.search).get("sample") === "1") {
     loadCloud(createSyntheticCloud(), "测试点云已生成");
@@ -307,21 +337,28 @@ function wireControls() {
   els.pointAttenuation.addEventListener("change", () => {
     state.pointAttenuation = els.pointAttenuation.checked;
     renderer.setPointAttenuation(state.pointAttenuation);
+    updatePerformanceStats();
   });
-  const syncMouseInversion = () => {
-    renderer.setMouseInversion({
-      rotate: els.invertRotateDrag.checked,
-      pan: els.invertPanDrag.checked,
-    });
-    const enabled = [];
-    if (els.invertRotateDrag.checked) enabled.push("旋转");
-    if (els.invertPanDrag.checked) enabled.push("平移");
-    showToast(enabled.length ? `已反转${enabled.join("、")}方向` : "已恢复默认鼠标方向");
-  };
-  els.invertRotateDrag.addEventListener("change", syncMouseInversion);
-  els.invertPanDrag.addEventListener("change", syncMouseInversion);
+  const navigationInputs = [
+    els.invertRotateX,
+    els.invertRotateY,
+    els.invertPanX,
+    els.invertPanY,
+    els.invertWheelZoom,
+    els.rotateSpeed,
+    els.panSpeed,
+    els.zoomSpeed,
+    els.walkSpeed,
+  ];
+  navigationInputs.forEach((input) => {
+    input.addEventListener("input", syncNavigationSettings);
+    input.addEventListener("change", syncNavigationSettings);
+  });
   document.querySelectorAll("[data-view-preset]").forEach((button) => {
-    button.addEventListener("click", () => renderer.setViewPreset(button.dataset.viewPreset));
+    button.addEventListener("click", () => {
+      renderer.setViewPreset(button.dataset.viewPreset);
+      showToast(`已切换到${button.textContent}视角。`);
+    });
   });
   els.routeEditMode.addEventListener("change", () => {
     renderer.setRouteEditMode(els.routeEditMode.checked);
@@ -455,9 +492,20 @@ function wireControls() {
   els.projectTree.addEventListener("change", handleProjectTreeChange);
 }
 
-function updateViewOverlays() {
+function updateViewOverlays(meta = {}) {
+  if (meta.interactive) {
+    setNavigationOverlaySuspended(true);
+    updatePerformanceStats(undefined, { throttle: true });
+    return;
+  }
+  setNavigationOverlaySuspended(false);
   drawMeasurement();
   updateViewGizmo();
+  updatePerformanceStats(undefined, { throttle: true });
+}
+
+function setNavigationOverlaySuspended(active) {
+  els.overlay.classList.toggle("suspended", Boolean(active));
 }
 
 function updateViewGizmo() {
@@ -471,7 +519,7 @@ function updateViewGizmo() {
     const projected = projectAxis(axis.vector, view.yaw, view.pitch);
     return { ...axis, x: 44 + projected[0] * 28, y: 44 - projected[1] * 28, depth: projected[2] };
   }).sort((a, b) => a.depth - b.depth);
-  els.viewGizmoSvg.innerHTML = `
+  const markup = `
     <circle class="gizmo-base" cx="44" cy="44" r="32" />
     ${axes.map((axis) => `
       <line x1="44" y1="44" x2="${axis.x}" y2="${axis.y}" style="stroke:${axis.color}" />
@@ -479,6 +527,10 @@ function updateViewGizmo() {
       <text x="${axis.x + 5}" y="${axis.y - 5}" style="fill:${axis.color}">${axis.name}</text>
     `).join("")}
   `;
+  if (markup !== lastViewGizmoMarkup) {
+    els.viewGizmoSvg.innerHTML = markup;
+    lastViewGizmoMarkup = markup;
+  }
 }
 
 function projectAxis(vector, yaw, pitch) {
@@ -510,6 +562,27 @@ function bindTabs(tabList) {
       drawMeasurement();
     });
   });
+}
+
+function syncNavigationSettings(options = {}) {
+  state.navigation = {
+    invertRotateX: els.invertRotateX.checked,
+    invertRotateY: els.invertRotateY.checked,
+    invertPanX: els.invertPanX.checked,
+    invertPanY: els.invertPanY.checked,
+    invertWheelZoom: els.invertWheelZoom.checked,
+    rotateSpeed: Number(els.rotateSpeed.value) || 1,
+    panSpeed: Number(els.panSpeed.value) || 1,
+    zoomSpeed: Number(els.zoomSpeed.value) || 1,
+    walkSpeed: Number(els.walkSpeed.value) || 1,
+  };
+  els.rotateSpeedValue.textContent = state.navigation.rotateSpeed.toFixed(2);
+  els.panSpeedValue.textContent = state.navigation.panSpeed.toFixed(2);
+  els.zoomSpeedValue.textContent = state.navigation.zoomSpeed.toFixed(2);
+  els.walkSpeedValue.textContent = state.navigation.walkSpeed.toFixed(2);
+  renderer.setNavigationSettings(state.navigation);
+  updatePerformanceStats();
+  if (!options.silent) showToast("浏览习惯设置已更新。");
 }
 
 function createLayerId(prefix) {
@@ -1798,6 +1871,7 @@ function updateEdl() {
     strength,
     radius,
   });
+  updatePerformanceStats();
 }
 
 function createAnnotationId() {
@@ -1809,6 +1883,7 @@ function setMode(mode) {
   els.orbitButton.classList.toggle("active", mode === "orbit");
   els.walkButton.classList.toggle("active", mode === "walk");
   els.statusMode.textContent = mode === "walk" ? "模式：漫游 W/A/S/D/Q/E" : "模式：轨道";
+  updatePerformanceStats();
 }
 
 function resetElevationFilter(apply) {
@@ -1930,6 +2005,34 @@ function updateStatus(renderCount) {
   els.statusPoints.textContent = `点数：${formatNumber(renderCount)} / ${formatNumber(sourceTotal)}`;
   const active = activeDatasetLayer();
   els.statusSampling.textContent = active?.cloud.sampled ? `活动抽样：1/${active.cloud.stride}` : "活动抽样：无";
+  updatePerformanceStats(renderCount);
+}
+
+function updatePerformanceStats(renderCount = renderer?.pointCount || 0, options = {}) {
+  if (!els.performanceStats || !renderer?.getStats) return;
+  const now = performance.now();
+  if (options.throttle && now - lastPerformanceUpdate < 250) return;
+  const stats = renderer.getStats();
+  const visibleClouds = state.datasets.filter((item) => item.visible).length;
+  const visibleRoutes = state.routes.filter((item) => item.visible).length;
+  const modeName = stats.mode === "walk" ? "漫游" : "轨道";
+  const edlState = stats.edl.enabled ? `EDL ${stats.edl.strength.toFixed(1)}/${stats.edl.radius.toFixed(1)}` : "EDL 关闭";
+  const pointStrategy = stats.pointAttenuation ? "近大远小" : "固定点";
+  const markup = `
+    <div><span>模式</span><strong>${modeName}</strong></div>
+    <div><span>FPS</span><strong>${stats.fps ? stats.fps.toFixed(0) : "-"}</strong></div>
+    <div><span>帧耗时</span><strong>${stats.lastRenderMs ? `${stats.lastRenderMs.toFixed(1)}ms` : "-"}</strong></div>
+    <div><span>渲染点</span><strong>${formatNumber(renderCount)}</strong></div>
+    <div><span>图层</span><strong>${visibleClouds} 点云 / ${visibleRoutes} 航线</strong></div>
+    <div><span>点策略</span><strong>${pointStrategy}</strong></div>
+    <div><span>增强</span><strong>${edlState}</strong></div>
+    <div><span>导航</span><strong>R${state.navigation.rotateSpeed.toFixed(2)} P${state.navigation.panSpeed.toFixed(2)} Z${state.navigation.zoomSpeed.toFixed(2)}</strong></div>
+  `;
+  if (markup !== lastPerformanceMarkup) {
+    els.performanceStats.innerHTML = markup;
+    lastPerformanceMarkup = markup;
+  }
+  lastPerformanceUpdate = now;
 }
 
 function addMeasurePoint(point) {
@@ -2156,19 +2259,22 @@ function renderClearance() {
 }
 
 function drawMeasurement() {
-  els.overlay.innerHTML = "";
-  els.overlay.setAttribute("viewBox", `0 0 ${els.canvas.clientWidth} ${els.canvas.clientHeight}`);
+  const viewBox = `0 0 ${els.canvas.clientWidth} ${els.canvas.clientHeight}`;
+  if (viewBox !== lastOverlayViewBox) {
+    els.overlay.setAttribute("viewBox", viewBox);
+    lastOverlayViewBox = viewBox;
+  }
   const routeMarkup = drawRouteOverlay();
   const annotationMarkup = drawAnnotationOverlay();
   const profileMarkup = drawProfileOverlay();
   const clearanceMarkup = drawClearanceOverlay();
   if (!state.measurement.length) {
-    els.overlay.innerHTML = `${routeMarkup}${profileMarkup}${clearanceMarkup}${annotationMarkup}`;
+    setOverlayMarkup(`${routeMarkup}${profileMarkup}${clearanceMarkup}${annotationMarkup}`);
     return;
   }
   const points = state.measurement.map((p) => renderer.projectToScreen(p)).filter(Boolean);
   if (!points.length) {
-    els.overlay.innerHTML = `${routeMarkup}${profileMarkup}${clearanceMarkup}${annotationMarkup}`;
+    setOverlayMarkup(`${routeMarkup}${profileMarkup}${clearanceMarkup}${annotationMarkup}`);
     return;
   }
   const lines = [];
@@ -2184,7 +2290,13 @@ function drawMeasurement() {
     <circle cx="${p.x}" cy="${p.y}" r="5" />
     <text x="${p.x + 8}" y="${p.y - 8}">${index + 1}</text>
   `).join("");
-  els.overlay.innerHTML = `${routeMarkup}${profileMarkup}${clearanceMarkup}${annotationMarkup}${lines.join("")}${circles}${labels.join("")}`;
+  setOverlayMarkup(`${routeMarkup}${profileMarkup}${clearanceMarkup}${annotationMarkup}${lines.join("")}${circles}${labels.join("")}`);
+}
+
+function setOverlayMarkup(markup) {
+  if (markup === lastOverlayMarkup) return;
+  els.overlay.innerHTML = markup;
+  lastOverlayMarkup = markup;
 }
 
 function drawRouteOverlay() {
