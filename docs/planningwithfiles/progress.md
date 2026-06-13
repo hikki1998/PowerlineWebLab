@@ -25,3 +25,6 @@
 ## 2026-06-13
 - Started repository publishing cleanup for GitHub target PowerlineWebLab.
 - Current Git branch is master; only untracked change is AGENTS.md; no remote was listed by git remote -v.
+- Committed contributor guide locally as `c83ce86 Add repository contributor guide`.
+- Added origin `https://github.com/hikki1998/PowerlineWebLab.git`; push failed because GitHub returned `Repository not found`.
+- Windows has no `gh` command. WSL has GitHub CLI 2.4.0 but is not logged in, so creating the GitHub repository is blocked on authentication.

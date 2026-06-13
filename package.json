@@ -9,8 +9,11 @@
   "scripts": {
     "build": "vinext build",
     "dev": "vinext dev",
+    "dev:viewer": "node scripts/dev-viewer.mjs",
     "test:las": "node scripts/test-las.mjs",
-    "validate": "npm run build && npm run test:las"
+    "test:route": "node scripts/test-route.mjs",
+    "test:analysis": "node scripts/test-analysis.mjs",
+    "validate": "npm run build && npm run test:las && npm run test:route && npm run test:analysis"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",

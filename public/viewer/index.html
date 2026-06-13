@@ -22,16 +22,19 @@
           <button id="orbitButton" class="tool-button active" title="轨道浏览">轨道</button>
           <button id="walkButton" class="tool-button" title="漫游模式">漫游</button>
           <button id="measureButton" class="tool-button" title="两点测距">测距</button>
+          <button id="profileButton" class="tool-button" title="沿两点生成点云剖面">剖面</button>
+          <button id="annotationButton" class="tool-button" title="点选点云添加问题标注">标注</button>
           <button id="clipButton" class="tool-button" title="显示裁剪控制">裁剪</button>
+          <button id="screenshotButton" class="tool-button" title="导出当前视图截图">截图</button>
         </nav>
       </header>
 
       <aside class="sidebar sidebar-left">
         <section class="panel upload-panel" id="dropZone">
-          <input id="fileInput" type="file" accept=".las" hidden />
+          <input id="fileInput" type="file" accept=".las,.json,application/json" hidden />
           <p class="panel-label">本地文件</p>
-          <h2>拖入 LAS 点云</h2>
-          <p>支持 `.las`，大文件会自动抽样渲染，原始文件不会上传。</p>
+          <h2>拖入 LAS 点云或航线 JSON</h2>
+          <p>支持 `.las` 与电力巡检航线 `.json`，原始文件不会上传。</p>
           <button id="chooseFileButton" class="wide-button">选择文件</button>
           <button id="sampleButton" class="wide-button ghost">生成测试点云</button>
         </section>
@@ -53,20 +56,27 @@
           </dl>
         </section>
 
-        <section class="panel class-panel">
-          <p class="panel-label">类别过滤</p>
-          <div id="classList" class="class-list empty">加载点云后显示类别</div>
-        </section>
       </aside>
 
       <main class="viewer-wrap">
         <canvas id="viewerCanvas"></canvas>
         <svg id="measureOverlay" class="measure-overlay"></svg>
+        <div id="viewGizmo" class="view-gizmo" aria-label="视角导航">
+          <svg id="viewGizmoSvg" viewBox="0 0 88 88" role="img" aria-label="方向轴"></svg>
+        </div>
+        <div id="cameraPreview" class="camera-preview hidden" aria-live="polite">
+          <div class="camera-preview-head">
+            <strong id="cameraPreviewTitle">航点相机预览</strong>
+            <span id="cameraPreviewSubtitle">-</span>
+          </div>
+          <svg id="cameraPreviewSvg" viewBox="0 0 260 138" role="img" aria-label="航点相机预览"></svg>
+          <div id="cameraPreviewMeta" class="camera-preview-meta"></div>
+        </div>
         <div id="emptyState" class="empty-state">
           <div>
             <p class="panel-label">工作台已就绪</p>
             <h1>打开本地 LAS 点云开始浏览</h1>
-            <p>支持 RGB、高程、类别三种显示；轨道浏览、漫游、裁剪、过滤和两点测距。</p>
+            <p>支持 RGB、高程、类别三种显示；轨道浏览、漫游、裁剪、测距和航线 JSON 绘制。</p>
             <div class="empty-actions">
               <button id="emptyOpenButton" class="wide-button">选择 LAS 文件</button>
               <button id="emptySampleButton" class="wide-button ghost">生成测试点云</button>
@@ -77,52 +87,262 @@
       </main>
 
       <aside class="sidebar sidebar-right">
-        <section class="panel">
-          <p class="panel-label">显示模式</p>
-          <div class="segmented" id="displayModeGroup">
-            <button data-mode="elevation" class="active">高程</button>
-            <button data-mode="classification">类别</button>
-            <button data-mode="rgb" id="rgbModeButton">RGB</button>
+        <div class="module-tabs" id="moduleTabs" role="tablist" aria-label="右侧功能模块">
+          <button class="active" data-panel="cloudPanel" type="button">点云</button>
+          <button data-panel="routePanel" type="button">航线</button>
+          <button data-panel="annotationPanel" type="button">标注</button>
+          <button data-panel="measurePanel" type="button">测量</button>
+          <button data-panel="performancePanel" type="button">性能</button>
+        </div>
+
+        <div class="tab-panel active" id="cloudPanel">
+          <section class="panel">
+            <p class="panel-label">显示模式</p>
+            <div class="segmented" id="displayModeGroup">
+              <button data-mode="elevation" class="active">高程</button>
+              <button data-mode="classification">类别</button>
+              <button data-mode="rgb" id="rgbModeButton">RGB</button>
+            </div>
+            <label class="control-row">
+              <span>点大小</span>
+              <input id="pointSize" type="range" min="1" max="8" value="2" step="0.5" />
+            </label>
+            <label class="toggle-row">
+              <input id="invertRotateDrag" type="checkbox" />
+              <span>反转旋转方向</span>
+            </label>
+            <label class="toggle-row">
+              <input id="invertPanDrag" type="checkbox" />
+              <span>反转平移方向</span>
+            </label>
+            <label class="toggle-row">
+              <input id="pointAttenuation" type="checkbox" checked />
+              <span>近大远小</span>
+            </label>
+          </section>
+
+          <section class="panel">
+            <p class="panel-label">视图导航</p>
+            <div class="view-preset-grid">
+              <button class="wide-button ghost" data-view-preset="iso" type="button">等轴测</button>
+              <button class="wide-button ghost" data-view-preset="top" type="button">俯视</button>
+              <button class="wide-button ghost" data-view-preset="front" type="button">前视</button>
+              <button class="wide-button ghost" data-view-preset="right" type="button">侧视</button>
+            </div>
+          </section>
+
+          <section class="panel">
+            <p class="panel-label">高程范围</p>
+            <div class="range-row">
+              <label>最小 <input id="minElevation" type="number" step="0.01" /></label>
+              <label>最大 <input id="maxElevation" type="number" step="0.01" /></label>
+            </div>
+            <button id="resetElevationButton" class="wide-button ghost">重置高程过滤</button>
+          </section>
+
+          <section class="panel" id="clipPanel">
+            <p class="panel-label">裁剪盒</p>
+            <label class="control-row"><span>X 最小</span><input id="clipMinX" type="range" min="0" max="100" value="0" /></label>
+            <label class="control-row"><span>X 最大</span><input id="clipMaxX" type="range" min="0" max="100" value="100" /></label>
+            <label class="control-row"><span>Y 最小</span><input id="clipMinY" type="range" min="0" max="100" value="0" /></label>
+            <label class="control-row"><span>Y 最大</span><input id="clipMaxY" type="range" min="0" max="100" value="100" /></label>
+            <label class="control-row"><span>Z 最小</span><input id="clipMinZ" type="range" min="0" max="100" value="0" /></label>
+            <label class="control-row"><span>Z 最大</span><input id="clipMaxZ" type="range" min="0" max="100" value="100" /></label>
+            <button id="resetClipButton" class="wide-button ghost">重置裁剪</button>
+          </section>
+
+          <section class="panel class-panel">
+            <p class="panel-label">类别过滤</p>
+            <div id="classList" class="class-list empty">加载点云后显示类别</div>
+          </section>
+        </div>
+
+        <div class="tab-panel" id="routePanel">
+          <section class="panel">
+            <p class="panel-label">航线信息</p>
+            <div id="routeInfo" class="status-stack">
+              <span>尚未加载航线 JSON</span>
+            </div>
+          </section>
+
+          <div class="sub-tabs" id="routeTabs" role="tablist" aria-label="航线模块">
+            <button class="active" data-panel="routeWaypointPanel" type="button">航点</button>
+            <button data-panel="routePartPanel" type="button">部件点</button>
+            <button data-panel="routeDisplayPanel" type="button">显示</button>
+            <button data-panel="routeMapPanel" type="button">地图</button>
           </div>
-          <label class="control-row">
-            <span>点大小</span>
-            <input id="pointSize" type="range" min="1" max="8" value="2" step="0.5" />
-          </label>
-        </section>
 
-        <section class="panel">
-          <p class="panel-label">高程范围</p>
-          <div class="range-row">
-            <label>最小 <input id="minElevation" type="number" step="0.01" /></label>
-            <label>最大 <input id="maxElevation" type="number" step="0.01" /></label>
+          <div class="tab-panel active" id="routeWaypointPanel">
+            <section class="panel">
+              <p class="panel-label">航点选择</p>
+              <input id="routeWaypointFilter" class="table-search" type="search" placeholder="序号 / 关联部件" />
+              <div class="table-controls">
+                <label class="toggle-row compact">
+                  <input id="showRouteCoordinates" type="checkbox" />
+                  <span>显示坐标</span>
+                </label>
+                <label class="toggle-row compact">
+                  <input id="showRouteAngles" type="checkbox" checked />
+                  <span>显示拍摄角度</span>
+                </label>
+              </div>
+              <label class="toggle-row">
+                <input id="routeEditMode" type="checkbox" />
+                <span>编辑模式（拖拽航点）</span>
+              </label>
+              <div class="route-actions">
+                <button id="addWaypointButton" class="wide-button ghost">新增航点</button>
+                <button id="deleteWaypointButton" class="wide-button ghost">删除航点</button>
+                <button id="exportRouteButton" class="wide-button">导出 JSON</button>
+              </div>
+              <div id="routeList" class="route-list empty">加载航线 JSON 后显示航点</div>
+              <div class="subtable-title">航点目标</div>
+              <div id="routeTargetList" class="route-list route-target-list empty">选择航点后显示目标</div>
+            </section>
+
+            <section class="panel">
+              <p class="panel-label">航点编辑</p>
+              <div id="waypointEditor" class="editor-grid"></div>
+            </section>
+
+            <section class="panel">
+              <p class="panel-label">目标编辑</p>
+              <div class="route-actions">
+                <button id="addTargetButton" class="wide-button ghost">新增目标</button>
+                <button id="deleteTargetButton" class="wide-button ghost">删除目标</button>
+              </div>
+              <label class="control-row">
+                <span>目标</span>
+                <select id="targetSelect"></select>
+              </label>
+              <div id="targetEditor" class="editor-grid"></div>
+            </section>
           </div>
-          <button id="resetElevationButton" class="wide-button ghost">重置高程过滤</button>
-        </section>
 
-        <section class="panel" id="clipPanel">
-          <p class="panel-label">裁剪盒</p>
-          <label class="control-row"><span>X 最小</span><input id="clipMinX" type="range" min="0" max="100" value="0" /></label>
-          <label class="control-row"><span>X 最大</span><input id="clipMaxX" type="range" min="0" max="100" value="100" /></label>
-          <label class="control-row"><span>Y 最小</span><input id="clipMinY" type="range" min="0" max="100" value="0" /></label>
-          <label class="control-row"><span>Y 最大</span><input id="clipMaxY" type="range" min="0" max="100" value="100" /></label>
-          <label class="control-row"><span>Z 最小</span><input id="clipMinZ" type="range" min="0" max="100" value="0" /></label>
-          <label class="control-row"><span>Z 最大</span><input id="clipMaxZ" type="range" min="0" max="100" value="100" /></label>
-          <button id="resetClipButton" class="wide-button ghost">重置裁剪</button>
-        </section>
+          <div class="tab-panel" id="routePartPanel">
+            <section class="panel">
+              <p class="panel-label">部件点</p>
+              <input id="routePartFilter" class="table-search" type="search" placeholder="名称 / 类型 / 相序" />
+              <div class="route-actions">
+                <button id="addPartButton" class="wide-button ghost">新增部件</button>
+                <button id="deletePartButton" class="wide-button ghost">删除部件</button>
+              </div>
+              <div id="partList" class="route-list empty">加载航线 JSON 后显示部件</div>
+            </section>
 
-        <section class="panel">
-          <p class="panel-label">测量结果</p>
-          <div id="measureInfo" class="measure-info">开启测距后，在点云上依次点击两个点。</div>
-        </section>
+            <section class="panel">
+              <p class="panel-label">部件编辑</p>
+              <div id="partEditor" class="editor-grid"></div>
+            </section>
+          </div>
 
-        <section class="panel">
-          <p class="panel-label">性能策略</p>
-          <ul class="compact-list">
-            <li>WebGL GPU buffer 渲染</li>
-            <li>自动抽样防止页面锁死</li>
-            <li>WebGPU 能力探测与后续渲染器边界</li>
-          </ul>
-        </section>
+          <div class="tab-panel" id="routeDisplayPanel">
+            <section class="panel">
+              <p class="panel-label">航线显示</p>
+              <label class="toggle-row"><input id="showWaypointLabels" type="checkbox" checked /><span>显示航点文字</span></label>
+              <label class="toggle-row"><input id="showPartLabels" type="checkbox" checked /><span>显示部件文字</span></label>
+              <label class="control-row">
+                <span>透明度 <em id="routeLabelOpacityValue">0.9</em></span>
+                <input id="routeLabelOpacity" type="range" min="0" max="1" step="0.05" value="0.9" />
+              </label>
+            </section>
+          </div>
+
+          <div class="tab-panel" id="routeMapPanel">
+            <section class="panel">
+              <p class="panel-label">地图联动</p>
+              <svg id="routeMap" class="route-map" viewBox="0 0 260 180" role="img" aria-label="航线经纬度平面图"></svg>
+            </section>
+          </div>
+        </div>
+
+        <div class="tab-panel" id="annotationPanel">
+          <section class="panel">
+            <p class="panel-label">巡检标注</p>
+            <div class="route-actions">
+              <button id="addViewBookmarkButton" class="wide-button ghost" type="button">保存视图书签</button>
+              <button id="exportAnnotationsButton" class="wide-button" type="button">导出标注</button>
+            </div>
+            <label class="toggle-row">
+              <input id="annotationMode" type="checkbox" />
+              <span>点选点云添加问题点</span>
+            </label>
+            <div id="annotationHint" class="measure-info">开启后，左键点选点云生成问题点；点击列表可回到位置。</div>
+          </section>
+
+          <section class="panel">
+            <p class="panel-label">标注列表</p>
+            <div id="annotationList" class="annotation-list empty">暂无标注或视图书签</div>
+          </section>
+
+          <section class="panel">
+            <p class="panel-label">标注详情</p>
+            <div id="annotationEditor" class="editor-grid empty">选择标注后可编辑标题、级别、状态和备注。</div>
+          </section>
+        </div>
+
+        <div class="tab-panel" id="measurePanel">
+          <section class="panel">
+            <p class="panel-label">测量结果</p>
+            <div id="measureInfo" class="measure-info">开启测距后，左键连续添加点，右键回退。</div>
+          </section>
+
+          <section class="panel">
+            <p class="panel-label">剖面分析</p>
+            <label class="control-row">
+              <span>通道宽度 <em id="profileWidthValue">8.0</em></span>
+              <input id="profileWidth" type="range" min="1" max="40" value="8" step="0.5" />
+            </label>
+            <div class="route-actions">
+              <button id="clearProfileButton" class="wide-button ghost" type="button">清空剖面</button>
+              <button id="fitProfileButton" class="wide-button ghost" type="button">定位剖面</button>
+            </div>
+            <div id="profileInfo" class="measure-info">点击工具栏“剖面”，在点云上选取起点和终点。</div>
+            <svg id="profileChart" class="profile-chart" viewBox="0 0 360 180" role="img" aria-label="点云剖面图"></svg>
+          </section>
+
+          <section class="panel">
+            <p class="panel-label">净空辅助</p>
+            <label class="control-row">
+              <span>搜索半径 <em id="clearanceRadiusValue">3.0</em></span>
+              <input id="clearanceRadius" type="range" min="0.5" max="12" value="3" step="0.5" />
+            </label>
+            <label class="control-row">
+              <span>告警阈值 <em id="clearanceThresholdValue">8.0</em></span>
+              <input id="clearanceThreshold" type="range" min="1" max="30" value="8" step="0.5" />
+            </label>
+            <button id="runClearanceButton" class="wide-button" type="button">分析导线净空</button>
+            <div id="clearanceInfo" class="measure-info">基于当前抽样点云，估算导线/地线到地面、植被、建筑和交跨点的垂直距离。</div>
+            <div id="clearanceList" class="clearance-list empty">暂无净空分析结果</div>
+          </section>
+        </div>
+
+        <div class="tab-panel" id="performancePanel">
+          <section class="panel">
+            <p class="panel-label">EDL 增强</p>
+            <label class="toggle-row">
+              <input id="edlEnabled" type="checkbox" />
+              <span>启用深度轮廓</span>
+            </label>
+            <label class="control-row">
+              <span>强度 <em id="edlStrengthValue">1.4</em></span>
+              <input id="edlStrength" type="range" min="0.2" max="4" value="1.4" step="0.1" />
+            </label>
+            <label class="control-row">
+              <span>半径 <em id="edlRadiusValue">1.4</em></span>
+              <input id="edlRadius" type="range" min="0.6" max="4" value="1.4" step="0.1" />
+            </label>
+          </section>
+
+          <section class="panel">
+            <p class="panel-label">性能策略</p>
+            <ul class="compact-list">
+              <li>WebGL GPU buffer 渲染</li>
+              <li>自动抽样防止页面锁死</li>
+              <li>WebGPU 能力探测与后续渲染器边界</li>
+            </ul>
+          </section>
+        </div>
       </aside>
 
       <footer class="statusbar">
@@ -131,6 +351,32 @@
         <span id="statusSampling">抽样：-</span>
         <span id="statusCoords">坐标：-</span>
       </footer>
+
+      <div id="waypointDialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="waypointDialogTitle">
+        <section class="waypoint-dialog">
+          <header class="dialog-header">
+            <div>
+              <strong id="waypointDialogTitle">编辑航线航点</strong>
+              <span id="waypointDialogSummary">-</span>
+            </div>
+            <button id="waypointDialogClose" class="icon-button" type="button" aria-label="关闭">×</button>
+          </header>
+          <div class="dialog-section">
+            <p class="panel-label">目标列表</p>
+            <div id="waypointDialogTargets" class="dialog-table empty">当前航点没有目标</div>
+          </div>
+          <div class="dialog-section">
+            <p class="panel-label">航点与相机参数</p>
+            <div id="waypointDialogForm" class="dialog-form"></div>
+          </div>
+          <footer class="dialog-actions">
+            <button id="waypointDialogReset" class="wide-button ghost" type="button">复位</button>
+            <span></span>
+            <button id="waypointDialogSave" class="wide-button primary" type="button">保存</button>
+            <button id="waypointDialogCancel" class="wide-button ghost" type="button">取消</button>
+          </footer>
+        </section>
+      </div>
     </div>
     <script type="module" src="./src/main.js"></script>
   </body>

@@ -1,45 +1,71 @@
 export const CLASS_NAMES = {
-  0: "未分类",
-  1: "未指定",
-  2: "地面",
-  3: "低植被",
-  4: "中植被",
-  5: "高植被",
-  6: "建筑",
+  0: "创建点、未分类",
+  1: "未分类点",
+  2: "地面点",
+  3: "低矮植被点",
+  4: "中等植被点",
+  5: "高植被点",
+  6: "建筑物点",
   7: "低点",
   8: "模型关键点",
-  9: "水体",
-  10: "铁路",
-  11: "道路",
-  12: "重叠",
-  13: "导线",
-  14: "杆塔",
-  15: "杆塔结构",
-  16: "线缆连接器",
-  17: "桥面",
-  18: "高噪声",
+  9: "临时建筑物",
+  10: "桥梁",
+  11: "铁路",
+  12: "公路",
+  13: "不通航河流",
+  14: "湖泊",
+  15: "变电站",
+  16: "导线",
+  17: "杆塔",
+  18: "交叉跨越上",
+  19: "交叉跨越下",
+  20: "地线",
+  21: "其他",
+  22: "船舶/汽车",
+  23: "其他线路",
+  24: "建在线下的",
+  25: "通航河流",
+  26: "铁路承力索及接触线",
+  27: "绝缘子",
+  28: "引流线",
+  29: "塔身",
+  30: "Reserved30",
+  31: "垂落区域",
 };
 
 export const CLASS_COLORS = {
-  0: [154, 164, 178],
-  1: [185, 190, 199],
-  2: [128, 106, 74],
-  3: [120, 190, 96],
-  4: [70, 160, 74],
-  5: [30, 120, 56],
-  6: [205, 194, 178],
-  7: [235, 80, 80],
-  8: [255, 208, 88],
-  9: [72, 148, 230],
-  10: [180, 180, 190],
-  11: [96, 96, 105],
-  12: [202, 152, 230],
-  13: [255, 190, 60],
-  14: [220, 120, 70],
-  15: [210, 92, 130],
-  16: [255, 145, 90],
-  17: [170, 145, 120],
-  18: [255, 70, 120],
+  0: [148, 163, 184],
+  1: [100, 116, 139],
+  2: [146, 108, 74],
+  3: [190, 242, 100],
+  4: [74, 222, 128],
+  5: [22, 163, 74],
+  6: [251, 146, 60],
+  7: [239, 68, 68],
+  8: [140, 16, 255],
+  9: [14, 165, 233],
+  10: [101, 120, 173],
+  11: [96, 96, 96],
+  12: [120, 120, 120],
+  13: [168, 85, 247],
+  14: [28, 126, 214],
+  15: [171, 71, 188],
+  16: [255, 128, 0],
+  17: [96, 96, 96],
+  18: [255, 150, 204],
+  19: [255, 124, 124],
+  20: [255, 142, 10],
+  21: [188, 188, 188],
+  22: [77, 182, 172],
+  23: [0, 150, 136],
+  24: [121, 85, 72],
+  25: [3, 169, 244],
+  26: [255, 193, 7],
+  27: [255, 194, 52],
+  28: [245, 192, 192],
+  29: [86, 86, 86],
+  30: [176, 176, 176],
+  31: [233, 30, 99],
 };
 
 const GRADIENT = [
@@ -51,26 +77,11 @@ const GRADIENT = [
 ];
 
 export function className(classification) {
-  return CLASS_NAMES[classification] || `类别 ${classification}`;
+  return CLASS_NAMES[classification] || "其他/未知";
 }
 
 export function classColor(classification) {
-  return CLASS_COLORS[classification] || hashColor(classification);
-}
-
-function hashColor(value) {
-  const hue = (value * 47) % 360;
-  const c = 0.72;
-  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
-  const m = 0.22;
-  let rgb;
-  if (hue < 60) rgb = [c, x, 0];
-  else if (hue < 120) rgb = [x, c, 0];
-  else if (hue < 180) rgb = [0, c, x];
-  else if (hue < 240) rgb = [0, x, c];
-  else if (hue < 300) rgb = [x, 0, c];
-  else rgb = [c, 0, x];
-  return rgb.map((v) => Math.round((v + m) * 255));
+  return CLASS_COLORS[classification] || [255, 85, 0];
 }
 
 export function elevationColor(value, min, max) {
@@ -89,12 +100,13 @@ export function elevationColor(value, min, max) {
 }
 
 export function buildColors(cloud, state) {
-  const { displayMode, elevationMin, elevationMax, visibleClasses, clip } = state;
+  const { displayMode, elevationMin, elevationMax, visibleClasses, classColors, clip } = state;
   const positions = cloud.positions;
   const sourceColors = cloud.rgb;
-  const outPositions = [];
-  const outColors = [];
   const count = positions.length / 3;
+  const outPositions = new Float32Array(positions.length);
+  const outColors = new Uint8Array(count * 3);
+  let dst = 0;
 
   for (let i = 0; i < count; i += 1) {
     const cls = cloud.classifications[i];
@@ -112,7 +124,9 @@ export function buildColors(cloud, state) {
       if (pz < clip.minZ || pz > clip.maxZ) continue;
     }
 
-    outPositions.push(px, py, pz);
+    outPositions[dst * 3] = px;
+    outPositions[dst * 3 + 1] = py;
+    outPositions[dst * 3 + 2] = pz;
 
     let color;
     if (displayMode === "rgb" && sourceColors) {
@@ -122,17 +136,19 @@ export function buildColors(cloud, state) {
         sourceColors[i * 3 + 2],
       ];
     } else if (displayMode === "classification") {
-      color = classColor(cls);
+      color = classColors?.get(cls) || classColor(cls);
     } else {
       color = elevationColor(z, elevationMin, elevationMax);
     }
-    outColors.push(color[0], color[1], color[2]);
+    outColors[dst * 3] = color[0];
+    outColors[dst * 3 + 1] = color[1];
+    outColors[dst * 3 + 2] = color[2];
+    dst += 1;
   }
 
   return {
-    positions: new Float32Array(outPositions),
-    colors: new Uint8Array(outColors),
-    count: outPositions.length / 3,
+    positions: outPositions.slice(0, dst * 3),
+    colors: outColors.slice(0, dst * 3),
+    count: dst,
   };
 }
-

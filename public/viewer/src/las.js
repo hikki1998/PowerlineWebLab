@@ -216,7 +216,7 @@ export function createSyntheticCloud(count = 180_000) {
     const x = t * 360 + jitter * 8;
     const y = line < 3 ? 45 + Math.sin(t * Math.PI * 4 + line) * 8 : pseudoRandom(i + 8) * 55;
     const z = line < 3 ? (line - 1) * 12 + jitter * 1.5 : (pseudoRandom(i + 3) - 0.5) * 150;
-    const cls = line < 3 ? 13 : (line === 3 ? 14 : (pseudoRandom(i + 9) > 0.72 ? 5 : 2));
+    const cls = line < 3 ? 16 : (line === 3 ? 20 : (pseudoRandom(i + 9) > 0.72 ? 5 : 2));
 
     positions[i * 3] = x;
     positions[i * 3 + 1] = y;
