@@ -791,6 +791,136 @@ input {
   overflow-wrap: anywhere;
 }
 
+.project-tree {
+  display: grid;
+  gap: 12px;
+}
+
+.project-tree.empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.tree-group {
+  display: grid;
+  gap: 6px;
+}
+
+.tree-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #d7e3f3;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.tree-group-title em {
+  min-width: 22px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--muted);
+  text-align: center;
+  font-style: normal;
+  font-size: 11px;
+}
+
+.tree-items {
+  display: grid;
+  gap: 6px;
+}
+
+.tree-empty {
+  border: 1px dashed rgba(148, 163, 184, 0.22);
+  border-radius: 6px;
+  padding: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tree-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px;
+  background: #0f1723;
+}
+
+.tree-item:hover {
+  border-color: #3f536c;
+  background: #121c2a;
+}
+
+.tree-item.active {
+  border-color: rgba(66, 199, 184, 0.74);
+  background: rgba(66, 199, 184, 0.12);
+}
+
+.tree-item.muted {
+  opacity: 0.58;
+}
+
+.tree-check {
+  display: grid;
+  place-items: center;
+}
+
+.tree-check input {
+  accent-color: var(--accent);
+}
+
+.tree-main {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-main strong,
+.tree-main span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-main strong {
+  font-size: 13px;
+}
+
+.tree-main span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.tree-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.tree-actions button {
+  min-width: 28px;
+  min-height: 26px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 5px;
+  background: #121c2a;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.tree-actions button:hover {
+  border-color: rgba(66, 199, 184, 0.58);
+  color: var(--text);
+}
+
 .class-list {
   display: grid;
   gap: 6px;

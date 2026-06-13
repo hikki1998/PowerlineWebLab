@@ -31,7 +31,7 @@
 
       <aside class="sidebar sidebar-left">
         <section class="panel upload-panel" id="dropZone">
-          <input id="fileInput" type="file" accept=".las,.json,application/json" hidden />
+          <input id="fileInput" type="file" accept=".las,.json,application/json" multiple hidden />
           <p class="panel-label">本地文件</p>
           <h2>拖入 LAS 点云或航线 JSON</h2>
           <p>支持 `.las` 与电力巡检航线 `.json`，原始文件不会上传。</p>
@@ -44,6 +44,11 @@
           <div id="fileStatus" class="status-stack">
             <span>尚未加载文件</span>
           </div>
+        </section>
+
+        <section class="panel project-panel">
+          <p class="panel-label">项目目录</p>
+          <div id="projectTree" class="project-tree empty">加载 LAS 或航线 JSON 后显示图层</div>
         </section>
 
         <section class="panel">

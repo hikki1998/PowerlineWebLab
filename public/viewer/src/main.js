@@ -43,6 +43,7 @@ const els = {
   toast: document.getElementById("toast"),
   viewGizmoSvg: document.getElementById("viewGizmoSvg"),
   fileStatus: document.getElementById("fileStatus"),
+  projectTree: document.getElementById("projectTree"),
   metadataList: document.getElementById("metadataList"),
   classList: document.getElementById("classList"),
   routeInfo: document.getElementById("routeInfo"),
@@ -138,6 +139,11 @@ const clipInputs = {
 };
 
 const state = {
+  projectOrigin: null,
+  datasets: [],
+  routes: [],
+  activeDatasetId: null,
+  activeRouteId: null,
   cloud: null,
   route: null,
   displayRoute: null,
@@ -201,6 +207,7 @@ function init() {
   updateAnnotationList();
   renderAnnotationEditor();
   renderProfile();
+  renderProjectTree();
   drawMeasurement();
   updateViewGizmo();
 }
@@ -220,9 +227,9 @@ function wireControls() {
   els.chooseFileButton.addEventListener("click", openPicker);
   els.openFileButton.addEventListener("click", openPicker);
   els.emptyOpenButton.addEventListener("click", openPicker);
-  els.fileInput.addEventListener("change", (event) => {
-    const file = event.target.files?.[0];
-    if (file) loadFile(file);
+  els.fileInput.addEventListener("change", async (event) => {
+    const files = [...(event.target.files || [])];
+    for (const file of files) await loadFile(file);
     event.target.value = "";
   });
 
@@ -231,8 +238,14 @@ function wireControls() {
   }
 
   els.resetViewButton.addEventListener("click", () => {
-    if (state.route) renderer.fitRouteToBounds();
-    else if (state.cloud) renderer.fitToBounds(state.cloud.localBounds);
+    const routeLayer = activeRouteLayer();
+    const dataset = activeDatasetLayer();
+    if (routeLayer?.visible && state.displayRoute?.bounds) renderer.fitToBounds(state.displayRoute.bounds);
+    else if (dataset) renderer.fitToBounds(projectBoundsForCloud(dataset.cloud));
+    else {
+      const bounds = projectVisibleBounds();
+      if (bounds) renderer.fitToBounds(bounds);
+    }
   });
   els.orbitButton.addEventListener("click", () => setMode("orbit"));
   els.walkButton.addEventListener("click", () => setMode("walk"));
@@ -386,6 +399,8 @@ function wireControls() {
     if (!lngLat) return;
     updateWaypointFields(state.route, state.routeMapDrag, { lng: lngLat.lng, lat: lngLat.lat });
     state.route = rebuildInspectionRoute(state.route);
+    const layer = activeRouteLayer();
+    if (layer) layer.route = state.route;
     state.selectedWaypointIndex = state.routeMapDrag;
     syncRouteRenderer();
     updateRouteList();
@@ -432,10 +447,12 @@ function wireControls() {
     zone.addEventListener("drop", (event) => {
       event.preventDefault();
       els.dropZone.classList.remove("dragging");
-      const file = event.dataTransfer?.files?.[0];
-      if (file) loadFile(file);
+      const files = [...(event.dataTransfer?.files || [])];
+      files.forEach((file) => loadFile(file));
     });
   }
+  els.projectTree.addEventListener("click", handleProjectTreeClick);
+  els.projectTree.addEventListener("change", handleProjectTreeChange);
 }
 
 function updateViewOverlays() {
@@ -495,6 +512,97 @@ function bindTabs(tabList) {
   });
 }
 
+function createLayerId(prefix) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function activeDatasetLayer() {
+  return state.datasets.find((item) => item.id === state.activeDatasetId) || null;
+}
+
+function activeRouteLayer() {
+  return state.routes.find((item) => item.id === state.activeRouteId) || null;
+}
+
+function createDatasetLayer(cloud) {
+  const [minElevation, maxElevation] = sampledMinMax(cloud.elevations, 200_000);
+  return {
+    id: createLayerId("cloud"),
+    kind: "cloud",
+    name: cloud.header.fileName,
+    visible: true,
+    cloud,
+    visibleClasses: new Set([...cloud.classCounts.keys()]),
+    classColors: new Map([...cloud.classCounts.keys()].map((cls) => [cls, classColor(cls)])),
+    elevationMin: round(minElevation),
+    elevationMax: round(maxElevation),
+    renderCount: cloud.renderedPointCount,
+  };
+}
+
+function createRouteLayer(route) {
+  return {
+    id: createLayerId("route"),
+    kind: "route",
+    name: route.fileName,
+    visible: true,
+    route,
+    displayRoute: null,
+  };
+}
+
+function activateDataset(id, options = {}) {
+  const dataset = state.datasets.find((item) => item.id === id);
+  if (!dataset) {
+    state.activeDatasetId = null;
+    state.cloud = null;
+    return;
+  }
+  state.activeDatasetId = id;
+  state.cloud = dataset.cloud;
+  state.visibleClasses = dataset.visibleClasses;
+  state.classColors = dataset.classColors;
+  state.elevationMin = dataset.elevationMin;
+  state.elevationMax = dataset.elevationMax;
+  state.displayMode = state.cloud.rgb ? state.displayMode : (state.displayMode === "rgb" ? "elevation" : state.displayMode);
+  syncElevationInputs();
+  updateMetadata();
+  updateClassList();
+  updateDisplayButtons();
+  renderProjectTree();
+  syncRouteRenderer();
+  if (options.updateRender !== false) applyRenderState(true);
+}
+
+function activateRoute(id, options = {}) {
+  const layer = state.routes.find((item) => item.id === id);
+  if (!layer) {
+    state.activeRouteId = null;
+    state.route = null;
+    state.displayRoute = null;
+    renderer.setRoute(null);
+    return;
+  }
+  state.activeRouteId = id;
+  state.route = layer.route;
+  state.selectedWaypointIndex = Math.min(state.selectedWaypointIndex, Math.max(state.route.waypointObjects.length - 1, 0));
+  state.selectedPartIndex = Math.min(state.selectedPartIndex, Math.max(state.route.parts.length - 1, 0));
+  state.selectedTargetIndex = 0;
+  syncRouteRenderer();
+  updateRouteInfo();
+  updateRouteList();
+  updatePartList();
+  updateTargetList();
+  renderEditors();
+  renderProjectTree();
+  if (options.updateRender !== false) drawMeasurement();
+}
+
+function syncElevationInputs() {
+  els.minElevation.value = state.elevationMin;
+  els.maxElevation.value = state.elevationMax;
+}
+
 async function loadFile(file) {
   const name = file.name.toLowerCase();
   if (name.endsWith(".json")) {
@@ -537,10 +645,10 @@ async function loadRouteFile(file) {
 }
 
 function loadCloud(cloud, message) {
-  state.cloud = cloud;
-  state.visibleClasses = new Set([...cloud.classCounts.keys()]);
-  state.classColors = new Map([...cloud.classCounts.keys()].map((cls) => [cls, classColor(cls)]));
-  state.displayMode = cloud.rgb ? state.displayMode : (state.displayMode === "rgb" ? "elevation" : state.displayMode);
+  if (!state.projectOrigin) state.projectOrigin = [...cloud.center];
+  const dataset = createDatasetLayer(cloud);
+  state.datasets.push(dataset);
+  activateDataset(dataset.id, { updateRender: false });
   state.measurement = [];
   state.measureMode = false;
   state.profilePoints = [];
@@ -559,30 +667,34 @@ function loadCloud(cloud, message) {
   updateAnnotationList();
   renderAnnotationEditor();
   els.emptyState.classList.add("hidden");
-  resetElevationFilter(false);
+  syncElevationInputs();
   syncClipInputs();
   updateMetadata();
   updateClassList();
   updateDisplayButtons();
+  renderProjectTree();
   applyRenderState(true);
   syncRouteRenderer();
-  renderer.fitToBounds(cloud.localBounds);
+  renderer.fitToBounds(projectBoundsForCloud(cloud));
   showToast(message);
 }
 
 function loadRoute(route, message) {
-  state.route = route;
+  const routeLayer = createRouteLayer(route);
+  state.routes.push(routeLayer);
+  activateRoute(routeLayer.id, { updateRender: false });
   state.selectedWaypointIndex = 0;
   state.selectedPartIndex = 0;
   state.selectedTargetIndex = 0;
   syncRouteRenderer();
-  renderer.fitRouteToBounds();
+  if (state.displayRoute?.bounds) renderer.fitToBounds(state.displayRoute.bounds);
   els.emptyState.classList.add("hidden");
   updateRouteInfo();
   updateRouteList();
   updatePartList();
   updateTargetList();
   renderEditors();
+  renderProjectTree();
   updateRouteSelection(0);
   setFileStatus([
     route.fileName,
@@ -593,10 +705,22 @@ function loadRoute(route, message) {
 }
 
 function syncRouteRenderer() {
-  if (!state.route) return;
-  state.displayRoute = state.cloud ? routeToCloudLocal(state.route, state.cloud.center) : state.route;
-  renderer.setRoute(state.displayRoute);
-  renderer.setSelectedWaypoint(state.selectedWaypointIndex, state.selectedTargetIndex);
+  const routeLayer = activeRouteLayer();
+  if (!routeLayer) {
+    state.route = null;
+    state.displayRoute = null;
+    renderer.setRoute(null);
+    updateRouteInfo();
+    updateCameraPreview();
+    drawMeasurement();
+    renderRouteMap();
+    return;
+  }
+  state.route = routeLayer.route;
+  state.displayRoute = state.projectOrigin ? routeToCloudLocal(state.route, state.projectOrigin) : state.route;
+  routeLayer.displayRoute = state.displayRoute;
+  renderer.setRoute(routeLayer.visible ? state.displayRoute : null);
+  if (routeLayer.visible) renderer.setSelectedWaypoint(state.selectedWaypointIndex, state.selectedTargetIndex);
   updateRouteInfo();
   updateCameraPreview();
   drawMeasurement();
@@ -604,24 +728,240 @@ function syncRouteRenderer() {
 }
 
 function applyRenderState(skipStatus = false) {
-  if (!state.cloud) return;
-  const clip = state.clipEnabled ? percentClipToBounds() : null;
-  const buffers = buildColors(state.cloud, {
-    displayMode: state.displayMode,
-    elevationMin: state.elevationMin,
-    elevationMax: state.elevationMax,
-    visibleClasses: state.visibleClasses,
-    classColors: state.classColors,
-    clip,
-  });
+  if (!state.datasets.length) {
+    renderer.setCloud({ positions: new Float32Array(), colors: new Uint8Array(), bounds: { min: [-1, -1, -1], max: [1, 1, 1] } });
+    updateStatus(0);
+    drawMeasurement();
+    return;
+  }
+  const composed = composeVisibleCloudBuffers();
   renderer.setCloud({
-    positions: buffers.positions,
-    colors: buffers.colors,
-    bounds: state.cloud.localBounds,
+    positions: composed.positions,
+    colors: composed.colors,
+    bounds: composed.bounds || { min: [-1, -1, -1], max: [1, 1, 1] },
   });
-  if (!skipStatus) showToast(`当前渲染 ${formatNumber(buffers.count)} 点`);
-  updateStatus(buffers.count);
+  if (!skipStatus) showToast(`当前渲染 ${formatNumber(composed.count)} 点，来自 ${composed.layerCount} 个可见点云`);
+  updateStatus(composed.count);
+  renderProjectTree();
   drawMeasurement();
+}
+
+function composeVisibleCloudBuffers() {
+  const visibleDatasets = state.datasets.filter((item) => item.visible);
+  const built = visibleDatasets.map((dataset) => {
+    const clip = state.clipEnabled && dataset.id === state.activeDatasetId ? percentClipToBounds() : null;
+    const buffers = buildColors(dataset.cloud, {
+      displayMode: state.displayMode,
+      elevationMin: dataset.elevationMin,
+      elevationMax: dataset.elevationMax,
+      visibleClasses: dataset.visibleClasses,
+      classColors: dataset.classColors,
+      clip,
+    });
+    dataset.renderCount = buffers.count;
+    return { dataset, buffers };
+  });
+  const total = built.reduce((sum, item) => sum + item.buffers.count, 0);
+  const positions = new Float32Array(total * 3);
+  const colors = new Uint8Array(total * 3);
+  let cursor = 0;
+  let bounds = null;
+  for (const { dataset, buffers } of built) {
+    const offset = projectOffsetForCloud(dataset.cloud);
+    for (let i = 0; i < buffers.count; i += 1) {
+      const src = i * 3;
+      const dst = (cursor + i) * 3;
+      positions[dst] = buffers.positions[src] + offset[0];
+      positions[dst + 1] = buffers.positions[src + 1] + offset[1];
+      positions[dst + 2] = buffers.positions[src + 2] + offset[2];
+      colors[dst] = buffers.colors[src];
+      colors[dst + 1] = buffers.colors[src + 1];
+      colors[dst + 2] = buffers.colors[src + 2];
+    }
+    bounds = mergeBounds(bounds, projectBoundsForCloud(dataset.cloud));
+    cursor += buffers.count;
+  }
+  return { positions, colors, count: total, layerCount: visibleDatasets.length, bounds };
+}
+
+function projectOffsetForCloud(cloud) {
+  const origin = state.projectOrigin || cloud.center || [0, 0, 0];
+  const center = cloud.center || [0, 0, 0];
+  return [
+    center[0] - origin[0],
+    center[2] - origin[2],
+    -(center[1] - origin[1]),
+  ];
+}
+
+function projectBoundsForCloud(cloud) {
+  const offset = projectOffsetForCloud(cloud);
+  return {
+    min: [
+      cloud.localBounds.min[0] + offset[0],
+      cloud.localBounds.min[1] + offset[1],
+      cloud.localBounds.min[2] + offset[2],
+    ],
+    max: [
+      cloud.localBounds.max[0] + offset[0],
+      cloud.localBounds.max[1] + offset[1],
+      cloud.localBounds.max[2] + offset[2],
+    ],
+  };
+}
+
+function projectVisibleBounds() {
+  return state.datasets
+    .filter((item) => item.visible)
+    .reduce((bounds, item) => mergeBounds(bounds, projectBoundsForCloud(item.cloud)), null);
+}
+
+function mergeBounds(a, b) {
+  if (!b) return a;
+  if (!a) return { min: [...b.min], max: [...b.max] };
+  return {
+    min: a.min.map((value, index) => Math.min(value, b.min[index])),
+    max: a.max.map((value, index) => Math.max(value, b.max[index])),
+  };
+}
+
+function renderProjectTree() {
+  if (!state.datasets.length && !state.routes.length) {
+    els.projectTree.className = "project-tree empty";
+    els.projectTree.textContent = "加载 LAS 或航线 JSON 后显示图层";
+    return;
+  }
+  els.projectTree.className = "project-tree";
+  els.projectTree.innerHTML = `
+    ${projectTreeGroup("点云", "cloud", state.datasets, state.activeDatasetId)}
+    ${projectTreeGroup("航线", "route", state.routes, state.activeRouteId)}
+  `;
+}
+
+function projectTreeGroup(title, kind, items, activeId) {
+  const rows = items.length ? items.map((item) => projectTreeRow(kind, item, item.id === activeId)).join("") : `
+    <div class="tree-empty">暂无${title}</div>
+  `;
+  return `
+    <div class="tree-group">
+      <div class="tree-group-title">
+        <span>${title}</span>
+        <em>${items.length}</em>
+      </div>
+      <div class="tree-items">${rows}</div>
+    </div>
+  `;
+}
+
+function projectTreeRow(kind, item, active) {
+  const meta = kind === "cloud"
+    ? `${formatNumber(item.renderCount || item.cloud.renderedPointCount)} / ${formatNumber(item.cloud.sourcePointCount)}`
+    : `航点 ${formatNumber(item.route.render.waypoints.length)}，部件 ${formatNumber(item.route.render.partPoints.length)}`;
+  return `
+    <div class="tree-item ${active ? "active" : ""} ${item.visible ? "" : "muted"}" data-kind="${kind}" data-id="${item.id}">
+      <label class="tree-check">
+        <input data-action="toggle" data-kind="${kind}" data-id="${item.id}" type="checkbox" ${item.visible ? "checked" : ""} />
+      </label>
+      <button class="tree-main" data-action="activate" data-kind="${kind}" data-id="${item.id}" type="button">
+        <strong>${escapeHtml(item.name)}</strong>
+        <span>${escapeHtml(meta)}</span>
+      </button>
+      <div class="tree-actions">
+        <button data-action="locate" data-kind="${kind}" data-id="${item.id}" type="button" title="定位">定</button>
+        <button data-action="remove" data-kind="${kind}" data-id="${item.id}" type="button" title="删除">删</button>
+      </div>
+    </div>
+  `;
+}
+
+function handleProjectTreeClick(event) {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  const { action, kind, id } = button.dataset;
+  if (action === "activate") {
+    if (kind === "cloud") activateDataset(id);
+    if (kind === "route") activateRoute(id);
+    return;
+  }
+  if (action === "locate") {
+    locateProjectLayer(kind, id);
+    return;
+  }
+  if (action === "remove") removeProjectLayer(kind, id);
+}
+
+function handleProjectTreeChange(event) {
+  const input = event.target.closest("input[data-action='toggle']");
+  if (!input) return;
+  setProjectLayerVisible(input.dataset.kind, input.dataset.id, input.checked);
+}
+
+function setProjectLayerVisible(kind, id, visible) {
+  if (kind === "cloud") {
+    const dataset = state.datasets.find((item) => item.id === id);
+    if (!dataset) return;
+    dataset.visible = visible;
+    applyRenderState(true);
+  } else {
+    const route = state.routes.find((item) => item.id === id);
+    if (!route) return;
+    route.visible = visible;
+    syncRouteRenderer();
+  }
+  renderProjectTree();
+}
+
+function locateProjectLayer(kind, id) {
+  if (kind === "cloud") {
+    const dataset = state.datasets.find((item) => item.id === id);
+    if (!dataset) return;
+    activateDataset(id, { updateRender: false });
+    renderer.fitToBounds(projectBoundsForCloud(dataset.cloud));
+    return;
+  }
+  const route = state.routes.find((item) => item.id === id);
+  if (!route) return;
+  activateRoute(id, { updateRender: false });
+  if (state.displayRoute?.bounds) renderer.fitToBounds(state.displayRoute.bounds);
+}
+
+function removeProjectLayer(kind, id) {
+  if (kind === "cloud") {
+    state.datasets = state.datasets.filter((item) => item.id !== id);
+    if (state.activeDatasetId === id) {
+      const next = state.datasets[0];
+      if (next) activateDataset(next.id, { updateRender: false });
+      else {
+        state.activeDatasetId = null;
+        state.cloud = null;
+        updateMetadata();
+        updateClassList();
+        updateDisplayButtons();
+      }
+    }
+    if (!state.datasets.length) state.projectOrigin = null;
+    applyRenderState(true);
+    syncRouteRenderer();
+  } else {
+    state.routes = state.routes.filter((item) => item.id !== id);
+    if (state.activeRouteId === id) {
+      const next = state.routes[0];
+      if (next) activateRoute(next.id, { updateRender: false });
+      else {
+        state.activeRouteId = null;
+        state.route = null;
+        state.displayRoute = null;
+        renderer.setRoute(null);
+        updateRouteInfo();
+        updateRouteList();
+        updatePartList();
+        updateTargetList();
+        renderEditors();
+      }
+    }
+    syncRouteRenderer();
+  }
+  renderProjectTree();
 }
 
 function updateRouteInfo() {
@@ -907,6 +1247,10 @@ function renderAnnotationEditor() {
 }
 
 function updateCameraPreview() {
+  if (!activeRouteLayer()?.visible) {
+    els.cameraPreview.classList.add("hidden");
+    return;
+  }
   const waypoint = state.route?.waypointObjects[state.selectedWaypointIndex];
   const displayWaypoint = state.displayRoute?.render.waypoints[state.selectedWaypointIndex];
   const displayTargets = state.displayRoute?.render.waypointTargetPoints[state.selectedWaypointIndex] || [];
@@ -1351,6 +1695,8 @@ function mutateRoute(mutator, options = {}) {
   try {
     mutator();
     state.route = rebuildInspectionRoute(state.route);
+    const layer = activeRouteLayer();
+    if (layer) layer.route = state.route;
     state.selectedWaypointIndex = Math.max(0, Math.min(state.selectedWaypointIndex, state.route.waypointObjects.length - 1));
     state.selectedPartIndex = Math.max(0, Math.min(state.selectedPartIndex, state.route.parts.length - 1));
     state.selectedTargetIndex = Math.max(0, state.selectedTargetIndex);
@@ -1372,13 +1718,15 @@ function moveWaypointByDisplayDelta(index, delta) {
   if (!state.route) return;
   const waypoint = state.route.waypointObjects[index];
   if (!waypoint) return;
-  const rawDelta = state.cloud ? [delta[0], -delta[2], delta[1]] : delta;
+  const rawDelta = state.projectOrigin ? [delta[0], -delta[2], delta[1]] : delta;
   updateWaypointFields(state.route, index, {
     pX: waypoint.pX + rawDelta[0],
     pY: waypoint.pY + rawDelta[1],
     pZ: waypoint.pZ + rawDelta[2],
   });
   state.route = rebuildInspectionRoute(state.route);
+  const layer = activeRouteLayer();
+  if (layer) layer.route = state.route;
   state.selectedWaypointIndex = index;
   syncRouteRenderer();
   updateRouteList();
@@ -1468,8 +1816,12 @@ function resetElevationFilter(apply) {
   const [min, max] = sampledMinMax(state.cloud.elevations, 200_000);
   state.elevationMin = round(min);
   state.elevationMax = round(max);
-  els.minElevation.value = state.elevationMin;
-  els.maxElevation.value = state.elevationMax;
+  const dataset = activeDatasetLayer();
+  if (dataset) {
+    dataset.elevationMin = state.elevationMin;
+    dataset.elevationMax = state.elevationMax;
+  }
+  syncElevationInputs();
   if (apply) applyRenderState();
 }
 
@@ -1482,11 +1834,26 @@ function updateElevationFromInputs() {
   }
   state.elevationMin = min;
   state.elevationMax = max;
+  const dataset = activeDatasetLayer();
+  if (dataset) {
+    dataset.elevationMin = min;
+    dataset.elevationMax = max;
+  }
   applyRenderState();
 }
 
 function updateMetadata() {
   const cloud = state.cloud;
+  if (!cloud) {
+    els.metadataList.innerHTML = `
+      <div><dt>文件</dt><dd>-</dd></div>
+      <div><dt>点格式</dt><dd>-</dd></div>
+      <div><dt>原始点数</dt><dd>-</dd></div>
+      <div><dt>渲染点数</dt><dd>-</dd></div>
+      <div><dt>范围</dt><dd>-</dd></div>
+    `;
+    return;
+  }
   const bounds = cloud.sourceBounds || cloud.header.bounds;
   els.metadataList.innerHTML = `
     <div><dt>文件</dt><dd>${escapeHtml(cloud.header.fileName)}</dd></div>
@@ -1505,6 +1872,11 @@ function updateMetadata() {
 }
 
 function updateClassList() {
+  if (!state.cloud) {
+    els.classList.textContent = "加载点云后显示类别";
+    els.classList.classList.add("empty");
+    return;
+  }
   const entries = [...state.cloud.classCounts.entries()].sort((a, b) => a[0] - b[0]);
   if (!entries.length) {
     els.classList.textContent = "未读取到类别信息";
@@ -1514,9 +1886,10 @@ function updateClassList() {
   els.classList.classList.remove("empty");
   els.classList.innerHTML = entries.map(([cls, count]) => {
     const color = state.classColors.get(cls) || classColor(cls);
+    const checked = state.visibleClasses.has(cls) ? "checked" : "";
     return `
       <label class="class-item">
-        <input type="checkbox" value="${cls}" checked />
+        <input type="checkbox" value="${cls}" ${checked} />
         <input class="swatch" type="color" value="${rgbToHex(color)}" data-class="${cls}" title="设置 ${className(cls)} 颜色" />
         <span>${className(cls)}</span>
         <em>${formatNumber(count)}</em>
@@ -1540,6 +1913,10 @@ function updateClassList() {
 }
 
 function updateDisplayButtons() {
+  if (!state.cloud) {
+    els.rgbModeButton.disabled = true;
+    return;
+  }
   els.rgbModeButton.disabled = !state.cloud.rgb;
   els.rgbModeButton.title = state.cloud.rgb ? "按 LAS RGB 着色" : "当前 LAS 不包含 RGB";
   for (const button of els.displayModeGroup.querySelectorAll("button")) {
@@ -1548,9 +1925,11 @@ function updateDisplayButtons() {
 }
 
 function updateStatus(renderCount) {
-  const cloud = state.cloud;
-  els.statusPoints.textContent = `点数：${formatNumber(renderCount)} / ${formatNumber(cloud.sourcePointCount)}`;
-  els.statusSampling.textContent = cloud.sampled ? `抽样：1/${cloud.stride}` : "抽样：无";
+  const visible = state.datasets.filter((item) => item.visible);
+  const sourceTotal = visible.reduce((sum, item) => sum + item.cloud.sourcePointCount, 0);
+  els.statusPoints.textContent = `点数：${formatNumber(renderCount)} / ${formatNumber(sourceTotal)}`;
+  const active = activeDatasetLayer();
+  els.statusSampling.textContent = active?.cloud.sampled ? `活动抽样：1/${active.cloud.stride}` : "活动抽样：无";
 }
 
 function addMeasurePoint(point) {
@@ -1809,6 +2188,7 @@ function drawMeasurement() {
 }
 
 function drawRouteOverlay() {
+  if (!activeRouteLayer()?.visible) return "";
   if (!state.route || !state.displayRoute) return "";
   const projections = renderer.getRouteLabelProjections();
   if (!projections) return "";
