@@ -17,7 +17,7 @@ The UI exposes EDL enabled, strength, and radius controls. If framebuffer setup 
 The class list remains the main classification workflow. Each class row includes visibility, a color swatch, and a color picker. Defaults use the current LAS classification palette already present in the project. User color edits update the classification display immediately and do not change class visibility.
 
 ## Mouse Interaction
-Orbit mode defaults to left-button rotate and right-button pan. A new setting reverses left/right behavior. Walk mode keeps drag-to-look behavior because it is a navigation mode rather than a map-style orbit tool.
+Orbit mode defaults to left-button rotate, middle-button pan, and right-button pan. Separate settings reverse rotate direction and pan direction so users can match different desktop point-cloud software habits. Walk mode keeps drag-to-look behavior because it is a navigation mode rather than a map-style orbit tool.
 
 ## Measurement
 Measurement becomes a continuous polyline workflow. In measure mode:
